@@ -1,25 +1,13 @@
 import streamlit as st
 
-st.set_page_config(page_title="F1 Race Prediction", page_icon="🏎️", layout="wide")
+st.set_page_config(page_title="F1 Race Predictions", page_icon="🏁", layout="wide")
+race = st.Page("pages/1_Prediction.py", title="Race prediction", icon=":material/sports_motorsports:")
+history = st.Page("pages/2_Past_Predictions.py", title="Prediction history", icon=":material/history:")
 
-st.title("🏎️ Formula 1 Top-10 Prediction")
+# Keep the original prediction and history URLs available to bookmarked sessions.
+def landing():
+    st.switch_page(race)
 
-st.markdown(
-    """
-Welcome to the **Formula 1 Race Prediction System**.
 
-This application predicts whether a driver will finish inside the **Top 10**
-before a race begins.
-
-### Features
-
-- 🔮 Single Prediction
-- 📂 Batch Prediction (CSV)
-- 📊 View Past Predictions
-- 📈 Prediction History
-
-Use the navigation menu on the left to get started.
-"""
-)
-
-st.info("Select a page from the sidebar.")
+home = st.Page(landing, title="Home", default=True, visibility="hidden")
+st.navigation([home, race, history], position="top").run()

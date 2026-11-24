@@ -1,129 +1,95 @@
 import pandas as pd
 import streamlit as st
+
+from interface import masthead, results_table
 from services.api import get_options, predict
 
-st.title("🔮 Prediction")
-
-OTHER = "Other…"
-
-REQUIRED_COLUMNS = [
-    "Season",
-    "Round",
-    "CircuitID",
-    "DriverID",
-    "ConstructorName",
-    "Grid",
-]
+REQUIRED = ["Season", "Round", "CircuitID", "DriverID", "ConstructorName", "Grid"]
 
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def load_options():
-    """
-    One API call per session: the allowed categorical values, straight from
-    the trained model. Returns None if the API is unreachable, so the form
-    can fall back to free-text inputs.
-    """
-
-    result = get_options()
-
-    if isinstance(result, dict) and "error" in result:
-        return None
-
-    return result
+    return get_options()
 
 
-def categorical_input(label, key, options):
-    """
-    Dropdown of known values plus an "Other…" entry revealing a free-text
-    field (new drivers/constructors are allowed - the model handles unknown
-    values). Falls back to a plain text input when options are unavailable.
-    """
-
-    if options is None or not options.get(key):
-        return st.text_input(label, key=f"{key}_text")
-
-    choice = st.selectbox(label, options[key] + [OTHER], key=f"{key}_select")
-
-    if choice == OTHER:
-        return st.text_input(f"{label} (new value)", key=f"{key}_other")
-
-    return choice
+def category(label, key, default):
+    values = options.get(key, [])
+    if not values:
+        return st.text_input(label, value=default)
+    return st.selectbox(label, values, index=values.index(default) if default in values else 0,
+                        accept_new_options=True)
 
 
-options = load_options()
+masthead("Race prediction", "Estimate a driver’s chance of finishing in the top ten.")
+single, batch = st.tabs(["Single driver", "Batch upload"])
 
-if options is None:
-    st.warning("Could not load known values from the API - using free-text inputs.")
-
-st.header("Single Prediction")
-
-season = st.number_input("Season", min_value=2000, max_value=2030, value=2024)
-
-round_number = st.number_input("Round", min_value=1, max_value=25, value=1)
-
-circuit = categorical_input("Circuit", "CircuitID", options)
-
-driver = categorical_input("Driver", "DriverID", options)
-
-constructor = categorical_input("Constructor", "ConstructorName", options)
-
-grid_position = st.number_input("Grid Position", min_value=0, max_value=40, value=1)
-
-if st.button("Predict"):
-    if not (circuit and driver and constructor):
-        st.error("Please fill in circuit, driver and constructor.")
-    else:
-        row = {
-            "Season": int(season),
-            "Round": int(round_number),
-            "CircuitID": circuit,
-            "DriverID": driver,
-            "ConstructorName": constructor,
-            "Grid": int(grid_position),
-        }
-
-        with st.spinner("Calling prediction API..."):
-            result = predict([row])
-
-        if isinstance(result, dict) and "error" in result:
-            st.error(f"Prediction failed: {result['error']}")
+with single:
+    options = load_options()
+    if "error" in options:
+        st.warning("Driver and circuit lists are unavailable. Enter the values manually.")
+    setup, output = st.columns([1.45, 1], gap="medium")
+    with setup.container(border=True):
+        st.subheader("Race setup")
+        with st.form("race_setup"):
+            left, right = st.columns(2)
+            with left:
+                season = st.number_input("Season", 1950, 2100, 2022)
+                circuit = category("Circuit", "CircuitID", "bahrain")
+                driver = category("Driver", "DriverID", "leclerc")
+            with right:
+                round_num = st.number_input("Round", 1, 30, 1)
+                grid = st.number_input("Starting grid", 0, 40, 1)
+                team = category("Constructor", "ConstructorName", "Ferrari")
+            submitted = st.form_submit_button("Run prediction", type="primary", width="stretch")
+    with output.container(border=True):
+        st.subheader("Predicted finish")
+        if submitted:
+            if not all([circuit, driver, team]):
+                st.error("Enter a circuit, driver, and constructor.")
+            else:
+                row = dict(zip(REQUIRED, [season, round_num, circuit, driver, team, grid]))
+                with st.spinner("Running the model…"):
+                    result = predict([row])
+                if isinstance(result, dict):
+                    st.error(result.get("error", "Prediction unavailable."))
+                elif result:
+                    st.session_state.last_prediction = result[0]
+        last = st.session_state.get("last_prediction")
+        if last:
+            st.caption(f"{last['driver_id']} · {last['constructor_name']} · Grid {last['grid']}")
+            st.markdown("### " + ("Inside the top 10" if last["prediction"] else "Outside the top 10"))
+            chance = last.get("probability")
+            if chance is not None:
+                st.metric("Top-10 probability", f"{chance:.1%}")
+                st.progress(float(chance))
+            st.caption(f"{last['circuit_id']} · {last['season']} · Round {last['round']}")
+            with st.expander("Prediction details"):
+                results_table([last])
         else:
-            pred = result[0]
-            label = "✅ Top 10" if pred["prediction"] else "❌ Not Top 10"
-            st.success(f"{label} — probability: {pred['probability']:.1%}")
-            # brief: show the prediction as a dataframe with the features used
-            st.dataframe(pd.DataFrame(result), use_container_width=True)
+            st.metric("Top-10 probability", "—")
+            st.caption("Run a race setup to see the model’s forecast here.")
 
-st.divider()
-
-st.header("Batch Prediction")
-
-uploaded_file = st.file_uploader("Upload CSV", type="csv")
-
-if uploaded_file is not None:
-    dataframe = pd.read_csv(uploaded_file)
-
-    st.subheader("Preview")
-
-    st.dataframe(dataframe)
-
-    missing_columns = [col for col in REQUIRED_COLUMNS if col not in dataframe.columns]
-
-    if missing_columns:
-        st.error(
-            "CSV is missing required column(s): "
-            + ", ".join(missing_columns)
-            + f". Expected columns: {REQUIRED_COLUMNS}"
-        )
-    elif st.button("Predict Batch"):
-        rows = dataframe[REQUIRED_COLUMNS].to_dict(orient="records")
-
-        with st.spinner(f"Calling prediction API for {len(rows)} row(s)..."):
-            result = predict(rows)
-
-        if isinstance(result, dict) and "error" in result:
-            st.error(f"Batch prediction failed: {result['error']}")
+with batch:
+    st.subheader("Predict a starting grid")
+    st.caption("Upload one row per driver with these columns: " + ", ".join(REQUIRED))
+    upload = st.file_uploader("Race entries", type="csv")
+    if upload:
+        try:
+            frame = pd.read_csv(upload)
+        except (ValueError, UnicodeError) as error:
+            st.error(f"Could not read this CSV: {error}")
         else:
-            result_df = pd.DataFrame(result)
-            st.subheader("Results")
-            st.dataframe(result_df, use_container_width=True)
+            st.dataframe(frame, hide_index=True, width="stretch")
+            missing = [key for key in REQUIRED if key not in frame]
+            if missing:
+                st.error("Missing columns: " + ", ".join(missing))
+            elif frame.empty or frame[REQUIRED].isna().any().any():
+                st.warning("Include at least one driver and fill in all required values.")
+            elif st.button("Run batch prediction", type="primary"):
+                with st.spinner("Predicting finishes…"):
+                    result = predict(frame[REQUIRED].to_dict(orient="records"))
+                if isinstance(result, dict):
+                    st.error(result.get("error", "Batch prediction unavailable."))
+                else:
+                    st.subheader("Batch results")
+                    results_table(result)

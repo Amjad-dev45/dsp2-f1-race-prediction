@@ -1,46 +1,28 @@
-import pandas as pd
 import streamlit as st
+
+from interface import masthead, results_table
 from services.api import get_past_predictions
 
-st.title("📊 Past Predictions")
+masthead("Prediction history", "Review saved forecasts by date and prediction source.")
+with st.container(border=True):
+    start, end, channel = st.columns(3)
+    first = start.date_input("From", value=None)
+    last = end.date_input("Through", value=None)
+    source = channel.selectbox("Source", ["All", "Webapp", "Scheduled"])
 
-SOURCE_MAP = {
-    "All": "all",
-    "Webapp": "webapp",
-    "Scheduled": "scheduled",
-}
-
-col1, col2 = st.columns(2)
-
-with col1:
-    start_date = st.date_input("Start Date")
-
-with col2:
-    end_date = st.date_input("End Date")
-
-source = st.selectbox("Prediction Source", list(SOURCE_MAP.keys()))
-
-st.divider()
-
-st.subheader("Prediction History")
-
-with st.spinner("Loading past predictions..."):
-    result = get_past_predictions(
-        start_date=start_date.isoformat() if start_date else None,
-        end_date=end_date.isoformat() if end_date else None,
-        source=SOURCE_MAP[source],
-    )
-
-if isinstance(result, dict) and "error" in result:
-    st.error(f"Could not load past predictions: {result['error']}")
-elif result:
-    df = pd.json_normalize(result)
-
-    # Flatten "features" dict columns if present, for a friendlier table
-    if "features" in df.columns:
-        features_df = pd.json_normalize(df["features"])
-        df = pd.concat([df.drop(columns=["features"]), features_df], axis=1)
-
-    st.dataframe(df, use_container_width=True)
+if first and last and first > last:
+    st.warning("Choose an end date on or after the start date.")
 else:
-    st.info("No prediction history available.")
+    with st.spinner("Loading predictions…"):
+        records = get_past_predictions(first and first.isoformat(), last and last.isoformat(),
+                                       source.lower())
+    if isinstance(records, dict):
+        st.error(records.get("error", "Could not load history."))
+    elif records:
+        total, top, drivers = st.columns(3)
+        total.metric("Predictions", len(records), border=True)
+        top.metric("Predicted top 10", sum(bool(row["prediction"]) for row in records), border=True)
+        drivers.metric("Drivers", len({row["driver_id"] for row in records}), border=True)
+        results_table(records)
+    else:
+        st.info("No predictions match these filters. Run a prediction or change the date range.")
