@@ -1,0 +1,18 @@
+# build context of the api image is the repo root: keep it small
+.git
+.github
+**/__pycache__
+**/*.pyc
+**/.venv*
+**/venv
+.pytest_cache
+.env
+data
+artifacts
+airflow
+webapp
+scripts/kaggle_data
+scripts/.venv
+training/notebooks
+tests
+*.db

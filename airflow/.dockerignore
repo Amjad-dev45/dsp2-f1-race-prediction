@@ -1,0 +1,5 @@
+# the airflow image installs packages only; dags and the GX project are
+# bind-mounted at runtime
+dags
+great_expectations
+logs

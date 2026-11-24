@@ -1,0 +1,13 @@
+# pinned: unpinned installs broke the image once SQLAlchemy 2.1 switched its
+# default postgresql driver; scikit-learn must match the version the model
+# was pickled with (artifacts/model.pkl -> 1.9.0)
+fastapi==0.162.4
+uvicorn[standard]==0.54.0
+scikit-learn==1.9.0
+pandas==3.1.1
+joblib==1.6.0
+sqlalchemy==2.1.8
+psycopg2-binary==2.9.13
+python-dotenv==1.2.4
+mlflow-skinny==3.18.0
+skops==0.16.0

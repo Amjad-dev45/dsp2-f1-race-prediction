@@ -1,0 +1,15 @@
+apiVersion: 1
+
+# Grafana's built-in Teams integration sends Adaptive Cards, the format the
+# Teams Workflows webhook expects
+contactPoints:
+  - orgId: 1
+    name: ml-alerts-teams
+    receivers:
+      - uid: ml_alerts_teams
+        type: teams
+        disableResolveMessage: false
+        settings:
+          url: $ML_ALERTS_WEBHOOK_URL
+          title: '{{ template "default.title" . }}'
+          message: '{{ template "default.message" . }}'

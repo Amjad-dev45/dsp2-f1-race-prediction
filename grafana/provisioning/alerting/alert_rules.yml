@@ -1,0 +1,116 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: f1_drift_and_prediction_alerts
+    folder: F1 MLOps
+    interval: 1m
+    rules:
+      - uid: f1_feature_drift_grid_zscore
+        title: F1 Feature Drift - Grid Distribution Shift
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: f1_postgres_ds
+            model:
+              editorMode: code
+              format: table
+              rawQuery: true
+              rawSql: |
+                WITH baseline AS (
+                  SELECT
+                    MAX(CASE WHEN stat = 'mean' THEN value END) AS mean_val,
+                    NULLIF(MAX(CASE WHEN stat = 'std' THEN value END), 0) AS std_val
+                  FROM training_stats
+                  WHERE feature = 'Grid' AND is_baseline = true
+                ),
+                live AS (
+                  SELECT AVG(grid::float) AS live_mean
+                  FROM prediction_logs
+                  WHERE created_at >= NOW() - INTERVAL '15 minutes'
+                )
+                SELECT
+                  COALESCE(ABS(live.live_mean - baseline.mean_val) / baseline.std_val, 0) AS grid_zscore
+                FROM live CROSS JOIN baseline;
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 1.0
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          summary: "Feature Drift Detected: Grid Z-score exceeded 1.0"
+          description: "Live 15-minute average starting Grid position has shifted significantly (>1 SD) from the champion training baseline."
+        labels:
+          severity: warning
+          alert_category: ml_drift
+
+      - uid: f1_prediction_drift_top10_rate
+        title: F1 Prediction Drift - Top-10 Positive Rate Shift
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: f1_postgres_ds
+            model:
+              editorMode: code
+              format: table
+              rawQuery: true
+              rawSql: |
+                WITH baseline AS (
+                  SELECT value AS base_rate
+                  FROM training_stats
+                  WHERE feature = 'top10' AND stat = 'positive_rate' AND is_baseline = true
+                  LIMIT 1
+                ),
+                live AS (
+                  SELECT AVG(CASE WHEN prediction THEN 1.0 ELSE 0.0 END) AS live_rate
+                  FROM prediction_logs
+                  WHERE created_at >= NOW() - INTERVAL '15 minutes'
+                )
+                SELECT
+                  COALESCE(ABS(live.live_rate - baseline.base_rate), 0) AS rate_delta
+                FROM live CROSS JOIN baseline;
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0.2
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          summary: "Prediction Drift Detected: Predicted Top-10 rate shifted by >20%"
+          description: "Live 15-minute predicted Top-10 finish rate diverged by more than 0.20 from the champion training baseline."
+        labels:
+          severity: critical
+          alert_category: ml_drift

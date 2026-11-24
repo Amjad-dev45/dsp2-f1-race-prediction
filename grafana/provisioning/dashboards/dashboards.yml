@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: F1 Drift & Prediction Dashboards
+    orgId: 1
+    folder: F1 MLOps
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/drift
+      foldersFromFilesStructure: false

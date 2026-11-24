@@ -1,0 +1,90 @@
+name: Release
+
+# CD: every push to main that passes CI becomes a GitHub release.
+# Version = latest vX.Y.Z tag + bump (patch by default; minor/major
+# can be chosen when running the workflow by hand). The first release is
+# v1.0.0. Release notes are generated from the merged pull requests.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version part to bump"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+
+  release:
+
+    # only after a successful CI run of a push to main (not a PR into main),
+    # or a manual run started from main
+    if: >-
+      (github.event_name == 'workflow_run'
+        && github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.event == 'push')
+      || (github.event_name == 'workflow_dispatch'
+        && github.ref == 'refs/heads/main')
+
+    runs-on: ubuntu-latest
+
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # the commit CI tested (workflow_run) or the main head (manual run)
+      TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      BUMP: ${{ inputs.bump || 'patch' }}
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0  # all tags, to find the latest version
+
+      - name: Skip if this commit is already released
+        id: check
+        run: |
+          if git tag --points-at "$TARGET_SHA" | grep -q '^v[0-9]'; then
+            echo "Commit $TARGET_SHA already has a release tag, nothing to do"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute next version
+        id: version
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          latest=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          if [ -z "$latest" ]; then
+            next="v1.0.0"
+          else
+            IFS=. read -r major minor patch <<< "${latest#v}"
+            case "$BUMP" in
+              major) next="v$((major + 1)).0.0" ;;
+              minor) next="v${major}.$((minor + 1)).0" ;;
+              *)     next="v${major}.${minor}.$((patch + 1))" ;;
+            esac
+          fi
+          echo "latest=${latest:-none} -> next=$next"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --target "$TARGET_SHA" \
+            --title "F1 Race Prediction ${{ steps.version.outputs.tag }}" \
+            --generate-notes

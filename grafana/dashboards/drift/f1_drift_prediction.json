@@ -1,0 +1,379 @@
+{
+  "uid": "f1-drift-prediction",
+  "title": "F1 Race Prediction - Drift & Model Monitoring",
+  "tags": [
+    "f1",
+    "mlops",
+    "drift",
+    "prediction"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Live Top-10 Prediction Rate (Last 15m)",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "f1_postgres_ds"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(ROUND(AVG(CASE WHEN prediction THEN 1.0 ELSE 0.0 END)::numeric, 3), 0) AS live_top10_rate FROM prediction_logs WHERE created_at >= NOW() - INTERVAL '15 minutes';"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.3
+              },
+              {
+                "color": "red",
+                "value": 0.7
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Baseline Top-10 Rate (Champion Training Set)",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "f1_postgres_ds"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT ROUND(value::numeric, 3) AS baseline_top10_rate FROM training_stats WHERE feature = 'top10' AND stat = 'positive_rate' AND is_baseline = true LIMIT 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Prediction Drift: Predicted Top-10 Rate vs Training Baseline",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "f1_postgres_ds"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT date_trunc('minute', created_at) AS time, AVG(CASE WHEN prediction THEN 1.0 ELSE 0.0 END) AS \"Live Top-10 Rate\", (SELECT value FROM training_stats WHERE feature='top10' AND stat='positive_rate' AND is_baseline=true LIMIT 1) AS \"Training Baseline\" FROM prediction_logs WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.3
+              },
+              {
+                "color": "red",
+                "value": 0.7
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line+area"
+            },
+            "fillOpacity": 0,
+            "showPoints": "auto"
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Prediction Confidence: Mean Probability by Model Version",
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "f1_postgres_ds"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT date_trunc('minute', created_at) AS time, COALESCE(model_version, 'unknown') AS metric, AVG(probability) AS value FROM prediction_logs WHERE $__timeFilter(created_at) GROUP BY 1, 2 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.2
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line+area"
+            },
+            "fillOpacity": 0,
+            "showPoints": "auto"
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Feature Drift: Mean Starting Grid Position vs Training Baseline",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "f1_postgres_ds"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT date_trunc('minute', created_at) AS time, AVG(grid::float) AS \"Live Mean Grid\", (SELECT value FROM training_stats WHERE feature='Grid' AND stat='mean' AND is_baseline=true LIMIT 1) AS \"Baseline Mean Grid\" FROM prediction_logs WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "fillOpacity": 0,
+            "showPoints": "auto"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Feature Drift: Grid Z-Score vs Training Baseline (10 min windows)",
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "f1_postgres_ds"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH b AS (SELECT MAX(CASE WHEN stat='mean' THEN value END) m, NULLIF(MAX(CASE WHEN stat='std' THEN value END),0) s FROM training_stats WHERE feature='Grid' AND is_baseline) SELECT $__timeGroupAlias(created_at, '10m'), ABS(AVG(grid::float) - MAX(b.m)) / MAX(b.s) AS \"Grid z-score\" FROM prediction_logs CROSS JOIN b WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 1.0
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line+area"
+            },
+            "fillOpacity": 0,
+            "showPoints": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "description": "|live mean Grid - baseline mean| / baseline std. Orange > 0.5, red > 1 (alert)."
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Categorical Drift: Constructor Share Distance vs Baseline (10 min windows)",
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "f1_postgres_ds"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH live AS (SELECT $__timeGroup(created_at, '10m') AS t, constructor_name AS c, COUNT(*)::float / SUM(COUNT(*)) OVER (PARTITION BY $__timeGroup(created_at, '10m')) AS share FROM prediction_logs WHERE $__timeFilter(created_at) GROUP BY 1, 2), base AS (SELECT category AS c, value AS share FROM training_stats WHERE feature='ConstructorName' AND stat='share' AND is_baseline), w AS (SELECT DISTINCT t FROM live), pairs AS (SELECT w.t, COALESCE(l.c, b.c) AS c, COALESCE(l.share, 0) AS ls, COALESCE(b.share, 0) AS bs FROM w CROSS JOIN base b FULL OUTER JOIN live l ON l.t = w.t AND l.c = b.c) SELECT t AS time, 0.5 * SUM(ABS(ls - bs)) AS \"Constructor TVD\" FROM pairs WHERE t IS NOT NULL GROUP BY t ORDER BY t;"
+        }
+      ],
+      "description": "Total variation distance between live and baseline ConstructorName shares (0 = same distribution, 1 = disjoint). Serving data comes from newer seasons than training, so ~0.5 is normal. Orange > 0.65, red > 0.8.",
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.65
+              },
+              {
+                "color": "red",
+                "value": 0.8
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line+area"
+            },
+            "fillOpacity": 0,
+            "showPoints": "auto"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "barchart",
+      "title": "Categorical Drift: Constructor Share (Live Window vs Training Baseline)",
+      "gridPos": {
+        "x": 12,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "f1_postgres_ds"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH live_total AS (SELECT NULLIF(COUNT(*), 0)::float AS n FROM prediction_logs WHERE $__timeFilter(created_at)), live_shares AS (SELECT constructor_name AS constructor, COUNT(*)::float / (SELECT n FROM live_total) AS live_share FROM prediction_logs WHERE $__timeFilter(created_at) GROUP BY 1), base_shares AS (SELECT category AS constructor, value AS baseline_share FROM training_stats WHERE feature = 'ConstructorName' AND stat = 'share' AND is_baseline = true) SELECT COALESCE(l.constructor, b.constructor) AS constructor, COALESCE(l.live_share, 0) AS \"Live Share\", COALESCE(b.baseline_share, 0) AS \"Training Baseline Share\" FROM live_shares l FULL OUTER JOIN base_shares b ON l.constructor = b.constructor ORDER BY \"Training Baseline Share\" DESC LIMIT 12;"
+        }
+      ]
+    }
+  ]
+}

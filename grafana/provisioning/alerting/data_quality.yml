@@ -1,0 +1,167 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: data-quality-teams
+    receivers:
+      - uid: data_quality_teams
+        type: teams
+        disableResolveMessage: false
+        settings:
+          url: $TEAMS_WEBHOOK_URL
+          title: '{{ template "default.title" . }}'
+          message: '{{ template "default.message" . }}'
+
+groups:
+  - orgId: 1
+    name: f1_data_quality_alerts
+    folder: F1 Data Quality
+    interval: 1m
+    rules:
+      - uid: f1_data_quality_medium_invalid_rate
+        title: F1 Data Quality - Medium Invalid Row Rate
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: f1_postgres_ds
+            model:
+              editorMode: code
+              format: table
+              rawQuery: true
+              rawSql: |
+                WITH recent AS (
+                  SELECT COALESCE(
+                    100.0 * SUM(invalid_rows) / NULLIF(SUM(total_rows), 0), 0
+                  ) AS invalid_percent
+                  FROM ingestion_stats
+                  WHERE ingested_at >= NOW() - INTERVAL '15 minutes'
+                )
+                SELECT CASE
+                  WHEN invalid_percent >= 10 AND invalid_percent <= 50
+                  THEN invalid_percent ELSE 0
+                END AS invalid_percent
+                FROM recent;
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: Ingestion invalid-row rate is between 10% and 50%.
+          description: Review the F1 Data Quality dashboard and latest Great Expectations Data Docs report.
+        labels:
+          severity: warning
+          alert_category: data_quality
+        notification_settings:
+          receiver: data-quality-teams
+
+      - uid: f1_data_quality_high_invalid_rate
+        title: F1 Data Quality - High Invalid Row Rate
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: f1_postgres_ds
+            model:
+              editorMode: code
+              format: table
+              rawQuery: true
+              rawSql: |
+                WITH recent AS (
+                  SELECT COALESCE(
+                    100.0 * SUM(invalid_rows) / NULLIF(SUM(total_rows), 0), 0
+                  ) AS invalid_percent
+                  FROM ingestion_stats
+                  WHERE ingested_at >= NOW() - INTERVAL '15 minutes'
+                )
+                SELECT CASE WHEN invalid_percent > 50
+                  THEN invalid_percent ELSE 0 END AS invalid_percent
+                FROM recent;
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: Ingestion invalid-row rate exceeds 50%.
+          description: Check the input batch, schema, and Great Expectations validation report.
+        labels:
+          severity: critical
+          alert_category: data_quality
+        notification_settings:
+          receiver: data-quality-teams
+
+      - uid: f1_data_quality_schema_error
+        title: F1 Data Quality - Schema Error
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: f1_postgres_ds
+            model:
+              editorMode: code
+              format: table
+              rawQuery: true
+              rawSql: |
+                SELECT COUNT(*) FILTER (WHERE schema_error)::double precision AS failures
+                FROM ingestion_stats
+                WHERE ingested_at >= NOW() - INTERVAL '15 minutes';
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Ingestion received a batch missing required columns.
+          description: Inspect the affected batch and schema validation report.
+        labels:
+          severity: critical
+          alert_category: data_quality
+        notification_settings:
+          receiver: data-quality-teams
